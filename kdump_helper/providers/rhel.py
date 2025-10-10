@@ -65,10 +65,16 @@ def install_el_debuginfo(kernel_release: str, console: Console) -> None:
     )
     # direct installs
     arch = platform.machine() or "x86_64"
-    for pkg in [
+    packages: List[str] = [
         f"kernel-debuginfo-{kernel_release}",
         f"kernel-debuginfo-common-{arch}-{kernel_release}",
-    ]:
+    ]
+    # On SLES/SUSE, flavors differ (default, azure, aws, gcp). Try them too.
+    # This function is used for EL-like installs, but we can opportunistically
+    # attempt SUSE names when running on SUSE hosts analyzing SUSE kernels.
+    for fl in ["default", "azure", "aws", "gcp"]:
+        packages.append(f"kernel-{fl}-debuginfo-{kernel_release}")
+    for pkg in packages:
         subprocess.run(
             [pm.binary, "install", "-y", pkg],
             stdout=subprocess.PIPE,

@@ -245,19 +245,17 @@ def install_kernel_debuginfo(
             f"linux-image-{kernel_release}-dbgsym",
         ], f"Installing linux-image-{kernel_release}-dbgsym...", console)  # type: ignore[arg-type]
     elif did in {"sles", "suse", "opensuse-leap", "opensuse-tumbleweed"}:
-        _run_with_progress(
-            [pm.binary, "mr", "-e", "repo-debug"],
-            "Enabling debug repository...",
-            console
-        )  # enable debug repo
-        # Common flavor is kernel-default
-        _run_with_progress([
-            pm.binary,
-            "--non-interactive",
-            "install",
-            "-y",
-            f"kernel-default-debuginfo-{kernel_release}",
-        ], f"Installing kernel-default-debuginfo-{kernel_release}...", console)  # type: ignore[arg-type]
+        _sles_enable_debuginfo_repos(console)
+        # Try flavor-specific debuginfo packages based on release suffix
+        flavors = ["azure", "aws", "gcp", "default"]
+        for fl in flavors:
+            pkg = f"kernel-{fl}-debuginfo-{kernel_release}" if fl != "default" else f"kernel-default-debuginfo-{kernel_release}"
+            _run_with_progress([
+                pm.binary,
+                "--non-interactive",
+                "install",
+                pkg,
+            ], f"Installing {pkg}...", console)  # type: ignore[arg-type]
     else:
         raise PackageManagerError(
             "Unsupported distribution for debuginfo install"
@@ -394,6 +392,10 @@ def _is_ubuntu_kernel(kernel_release: str) -> bool:
     lr = kernel_release.lower()
     # If it clearly looks like RHEL/CentOS (el7/el8/el9), it's not Ubuntu
     if re.search(r"(\.el[0-9]|el[0-9](?:[_\.]))", lr):
+        return False
+    # SLES/SUSE kernels often include a SLE build identifier like '-150700.'
+    # e.g. '6.4.0-150700.20.11-azure' → not Ubuntu
+    if re.search(r"-\d{6,}\.\d+", lr):
         return False
     ubuntu_tokens = ["ubuntu", "-generic", "-azure", "-aws", "-gcp", "lowlatency"]
     return any(tok in lr for tok in ubuntu_tokens)
@@ -807,4 +809,41 @@ def _download_with_progress(
         except Exception as e:
             last_err = str(e)
     raise PackageManagerError(f"Failed to download {url}: {last_err}")
+
+
+def _sles_enable_debuginfo_repos(console: Console) -> None:
+    """Enable SLES debuginfo repos by parsing zypper repos and turning on matching aliases.
+
+    Looks for repos with names containing 'Debuginfo' and enables them via
+    `zypper modifyrepo --enable <alias-or-number>`.
+    """
+    # List repos with numbers
+    proc = subprocess.run(
+        ["bash", "-lc", "zypper repos"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    if proc.returncode != 0 or not proc.stdout:
+        return
+    lines = proc.stdout.splitlines()
+    # Collect numeric ids for debuginfo repos
+    ids_to_enable: list[str] = []
+    for line in lines:
+        # Expect lines like: ' 1 | Alias | Name-with-Debuginfo | ...'
+        if "Debuginfo" not in line:
+            continue
+        parts = [p.strip() for p in line.split("|")]
+        if not parts:
+            continue
+        id_field = parts[0].strip()
+        if id_field.isdigit():
+            ids_to_enable.append(id_field)
+    # Enable found repos
+    for rid in ids_to_enable:
+        _run_with_progress(
+            ["zypper", "--non-interactive", "modifyrepo", "--enable", rid],
+            f"Enabling debuginfo repo {rid}...",
+            console,
+        )
 
