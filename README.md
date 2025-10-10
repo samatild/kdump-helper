@@ -6,41 +6,55 @@ Prepare any Linux box (RHEL/Ubuntu/Debian/SLES) as a kdump analysis machine.
 curl -fsSL https://raw.githubusercontent.com/samatild/kdump-helper/main/bootstrap.sh | bash
 ```
 
-This installs minimal prerequisites, creates an isolated Python env under `/opt/kdump-helper/.venv`, installs `kdump-helper`, and exposes `kdump-helper` on your PATH.
+This ensures a modern Python via pyenv (without relying on distro repos), creates an isolated Python env under `/opt/kdump-helper/.venv`, installs `kdump-helper`, and exposes `kdump-helper` on your PATH.
 
 ### Manual install (no bootstrap)
 If you prefer to install manually or run from a local checkout, use the steps below.
 
 1) Install minimal prerequisites (choose your distro):
 ```bash
-# Ubuntu/Debian
-sudo apt-get update && sudo apt-get install -y python3 python3-venv git curl ca-certificates
+# Ubuntu/Debian (for pyenv build toolchain)
+sudo apt-get update && sudo apt-get install -y git curl ca-certificates build-essential \
+  libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev libffi-dev \
+  liblzma-dev tk-dev uuid-dev libgdbm-dev libgdbm-compat-dev
 
-# RHEL/Rocky/Alma/Fedora
-sudo dnf install -y python3 python3-virtualenv git curl ca-certificates || \
-sudo yum install -y python3 python3-virtualenv git curl ca-certificates
+# RHEL/Rocky/Alma/Fedora (for pyenv build toolchain)
+sudo dnf install -y git curl ca-certificates gcc make openssl-devel bzip2 bzip2-devel \
+  libffi-devel zlib-devel readline-devel sqlite-devel xz xz-devel tk-devel gdbm-devel libuuid-devel || \
+sudo yum install -y git curl ca-certificates gcc make openssl-devel bzip2 bzip2-devel \
+  libffi-devel zlib-devel readline-devel sqlite-devel xz xz-devel tk-devel gdbm-devel libuuid-devel
 
-# SLES/openSUSE
+# SLES/openSUSE (for pyenv build toolchain)
 sudo zypper --non-interactive refresh && \
-sudo zypper --non-interactive install python3 python3-virtualenv git curl ca-certificates
+sudo zypper --non-interactive install git curl ca-certificates gcc make libopenssl-devel \
+  zlib-devel libbz2-devel libffi-devel readline-devel sqlite3-devel xz-devel tk-devel \
+  gdbm-devel libuuid-devel
 ```
 
-2) Create a dedicated virtual environment and activate it:
+2) Install a modern Python with pyenv, then create a venv (absolute path method):
 ```bash
 sudo mkdir -p /opt/kdump-helper && sudo chown "$USER" /opt/kdump-helper
-python3 -m venv /opt/kdump-helper/.venv
+git clone https://github.com/pyenv/pyenv.git /opt/kdump-helper/pyenv
+export PYENV_ROOT=/opt/kdump-helper/pyenv
+export PATH="$PYENV_ROOT/bin:$PATH"
+"$PYENV_ROOT/bin/pyenv" install -s 3.11.10
+
+# Create venv using the absolute pyenv Python path (avoids system python)
+PY3="$PYENV_ROOT/versions/3.11.10/bin/python3"
+"$PY3" -m venv /opt/kdump-helper/.venv
 source /opt/kdump-helper/.venv/bin/activate
-pip install -U pip setuptools wheel
+python -m pip install -U pip setuptools wheel
+python -m pip install -e .
 ```
 
 3a) Install from GitHub (recommended):
 ```bash
-pip install "git+https://github.com/samatild/kdump-helper.git"
+python -m pip install "git+https://github.com/samatild/kdump-helper.git"
 ```
 
 3b) Or install from a local folder (developer mode):
 ```bash
-pip install -e /path/to/kdump-helper
+python -m pip install -e /path/to/kdump-helper
 ```
 
 4) (Optional) Add a global shim to your PATH:

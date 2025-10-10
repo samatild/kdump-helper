@@ -50,11 +50,19 @@ def prepare() -> None:
     )
     pm.update_metadata()
     pm.install(pkgs)
-    # Always build gdb and crash from source to ensure latest features
-    console.print(Panel.fit("Installing build prerequisites..."))
-    _ensure_build_deps(info.id, pm)
-    console.print(Panel.fit("Building crash (LZO) from source..."))
-    _build_crash_from_source(pm)
+    # Build from source on most distros; on SLES/SUSE, use system crash
+    if info.id.lower() in {"sles", "suse", "opensuse-leap", "opensuse-tumbleweed"}:
+        console.print(Panel.fit("SUSE detected; installing distro crash instead of building"))
+        try:
+            pm.install(["crash", "gdb"])  # best-effort; gdb optional
+        except Exception:
+            pm.install(["crash"])  # fallback if gdb not available
+    else:
+        # Build gdb/crash from source to ensure latest features on non-SUSE
+        console.print(Panel.fit("Installing build prerequisites..."))
+        _ensure_build_deps(info.id, pm)
+        console.print(Panel.fit("Building crash (LZO) from source..."))
+        _build_crash_from_source(pm)
 
     console.print("[green]Done.[/]")
 
@@ -217,9 +225,9 @@ def _ensure_build_deps(distro_id: str, pm) -> None:
             "flex",
             "gmp-devel",
             "mpfr-devel",
-            "libmpc-devel",
+            "mpc-devel",
             "zlib-devel",
-            "liblzo2-devel",
+            "lzo-devel",
             
             "xz",
             "curl",

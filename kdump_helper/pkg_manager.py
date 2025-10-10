@@ -63,10 +63,10 @@ class ZypperManager(PackageManager):
         super().__init__(binary="zypper")
 
     def update_metadata(self) -> None:
-        run_cmd([self.binary, "refresh", "-y"])
+        run_cmd([self.binary, "--non-interactive", "refresh"])
 
     def install(self, packages: List[str]) -> None:
-        run_cmd([self.binary, "--non-interactive", "install", "-y", *packages])
+        run_cmd([self.binary, "--non-interactive", "install", *packages])
 
 
 def select_package_manager(distro_id: str) -> PackageManager:

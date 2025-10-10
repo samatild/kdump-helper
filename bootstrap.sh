@@ -3,13 +3,17 @@ set -euo pipefail
 
 # Cross-distro bootstrap for kdump-helper
 # - Installs minimal prereqs
-# - Creates venv under /opt/kdump-helper/.venv
+# - Ensures a modern Python via pyenv (no reliance on distro repos)
+# - Creates venv under /opt/kdump-helper/.venv using that Python
 # - Installs kdump-helper from GitHub
-# - Adds a global shim at /usr/local/bin/kdump-helper
+# - Adds global shim at /usr/local/bin/kdump-helper
 
 REPO_URL="https://github.com/samatild/kdump-helper.git"
 INSTALL_ROOT="/opt/kdump-helper"
 VENV_DIR="${INSTALL_ROOT}/.venv"
+PYENV_ROOT="${INSTALL_ROOT}/pyenv"
+# Pick a widely compatible modern Python (OpenSSL compat on older distros)
+PYTHON_VERSION="3.11.10"
 
 require_root() {
   if [[ $EUID -ne 0 ]]; then
@@ -31,17 +35,28 @@ install_prereqs() {
   case "$pm" in
     deb)
       apt-get update -y
-      apt-get install -y python3 python3-venv git curl ca-certificates
+      apt-get install -y git curl ca-certificates build-essential \
+        libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev \
+        libffi-dev liblzma-dev tk-dev uuid-dev libgdbm-dev libgdbm-compat-dev
       ;;
     dnf)
-      dnf install -y python3 python3-virtualenv git curl ca-certificates
+      dnf install -y git curl ca-certificates gcc make \
+        openssl-devel bzip2 bzip2-devel libffi-devel zlib-devel \
+        readline-devel sqlite-devel xz xz-devel tk-devel gdbm-devel \
+        libuuid-devel
       ;;
     yum)
-      yum install -y python3 python3-virtualenv git curl ca-certificates || true
+      yum install -y git curl ca-certificates gcc make \
+        openssl-devel bzip2 bzip2-devel libffi-devel zlib-devel \
+        readline-devel sqlite-devel xz xz-devel tk-devel gdbm-devel \
+        libuuid-devel || true
       ;;
     zypper)
       zypper --non-interactive refresh
-      zypper --non-interactive install python3 python3-virtualenv git curl ca-certificates
+      zypper --non-interactive install git curl ca-certificates gcc make \
+        libopenssl-devel zlib-devel libbz2-devel libffi-devel \
+        readline-devel sqlite3-devel xz-devel tk-devel gdbm-devel \
+        libuuid-devel
       ;;
     *)
       echo "Unsupported distro: install python3, python3-venv, git, curl manually and re-run." >&2
@@ -50,10 +65,31 @@ install_prereqs() {
   esac
 }
 
+install_pyenv() {
+  if [[ ! -d "$PYENV_ROOT" ]]; then
+    git clone https://github.com/pyenv/pyenv.git "$PYENV_ROOT"
+  fi
+  export PYENV_ROOT
+  export PATH="$PYENV_ROOT/bin:$PATH"
+}
+
+install_modern_python() {
+  # Ensure pyenv available in PATH
+  install_pyenv
+  # Build the requested Python if missing
+  if [[ ! -x "$PYENV_ROOT/versions/$PYTHON_VERSION/bin/python3" ]]; then
+    "${PYENV_ROOT}/bin/pyenv" install -s "$PYTHON_VERSION"
+  fi
+  PY3_BIN="$PYENV_ROOT/versions/$PYTHON_VERSION/bin/python3"
+  echo "Using Python: $($PY3_BIN -V)"
+}
+
 create_venv() {
   mkdir -p "$INSTALL_ROOT"
+  install_modern_python
+  local PY3_BIN="$PYENV_ROOT/versions/$PYTHON_VERSION/bin/python3"
   if [[ ! -d "$VENV_DIR" ]]; then
-    python3 -m venv "$VENV_DIR"
+    "$PY3_BIN" -m venv "$VENV_DIR"
   fi
   # shellcheck disable=SC1091
   source "$VENV_DIR/bin/activate"
