@@ -73,7 +73,7 @@ def select_package_manager(distro_id: str) -> PackageManager:
     did = distro_id.lower()
     if did in {"ubuntu", "debian"}:
         return AptManager()
-    if did in {"rhel", "redhat", "centos", "rocky", "almalinux", "fedora"}:
+    if did in {"rhel", "redhat", "centos", "rocky", "almalinux", "fedora", "azurelinux"}:
         return DnfManager()
     if did in {"sles", "suse", "opensuse-leap", "opensuse-tumbleweed"}:
         return ZypperManager()
@@ -85,4 +85,3 @@ def select_package_manager(distro_id: str) -> PackageManager:
     if shutil.which("zypper"):
         return ZypperManager()
     raise PackageManagerError("Unsupported distribution: no known package manager found")
-

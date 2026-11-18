@@ -98,7 +98,7 @@ create_venv() {
 }
 
 install_kdump_helper() {
-  pip install "git+${REPO_URL}"
+  pip install --upgrade "git+${REPO_URL}"
   # Also repair existing installs created with a restrictive root umask.
   chmod -R a+rX "$INSTALL_ROOT"
   ln -sf "$VENV_DIR/bin/kdump-helper" /usr/local/bin/kdump-helper

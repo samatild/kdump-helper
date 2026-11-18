@@ -1,6 +1,6 @@
 # kdump-helper
 Prepare a Linux box (RHEL/Ubuntu/Debian/SLES) as a kdump analysis machine.
-The bootstrap also works on Azure Linux 4.
+The bootstrap and `prepare` command also support Azure Linux 4.
 
 ### Quick start (single-line bootstrap)
 ```bash
@@ -69,9 +69,15 @@ sudo ln -sf /opt/kdump-helper/.venv/bin/kdump-helper /usr/local/bin/kdump-helper
 5) Use it:
 ```bash
 kdump-helper --help
-kdump-helper prepare
+sudo kdump-helper prepare
 kdump-helper analyze --vmcore /path/to/vmcore --launch
 ```
+
+On Azure Linux 4, `prepare` installs the distro-supported `crash` and `gdb`
+packages rather than compiling upstream crash and its embedded GDB. It also
+installs the baseline dump and RPM extraction tools. This avoids a large source
+build and does not change kdump capture services or boot settings. Other
+distributions retain their existing installation behavior.
 
 Update to latest:
 ```bash

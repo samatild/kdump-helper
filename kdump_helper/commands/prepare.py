@@ -24,6 +24,8 @@ def _packages_for_distro(distro_id: str) -> List[str]:
             "cpio",
             "rpm",
         ]
+    if did == "azurelinux":
+        return ["kexec-tools", "makedumpfile", "cpio", "rpm"]
     if did in {"rhel", "redhat", "centos", "rocky", "almalinux", "fedora"}:
         # On RHEL-like distros, makedumpfile is provided by kexec-tools
         # rpm2cpio is provided by rpm-build
@@ -50,8 +52,11 @@ def prepare() -> None:
     )
     pm.update_metadata()
     pm.install(pkgs)
-    # Build from source on most distros; on SLES/SUSE, use system crash
-    if info.id.lower() in {"sles", "suse", "opensuse-leap", "opensuse-tumbleweed"}:
+    # Use Azure Linux's supported packages instead of compiling embedded GDB.
+    if info.id.lower() == "azurelinux":
+        console.print(Panel.fit("Azure Linux detected; installing distro crash and gdb"))
+        pm.install(["crash", "gdb"])
+    elif info.id.lower() in {"sles", "suse", "opensuse-leap", "opensuse-tumbleweed"}:
         console.print(Panel.fit("SUSE detected; installing distro crash instead of building"))
         try:
             pm.install(["crash", "gdb"])  # best-effort; gdb optional
@@ -287,5 +292,4 @@ def _fetch_gdb_tarball() -> Path:
     else:
         download_with_progress(tar_url, tar_path, console)
     return tar_path
-
 
