@@ -1,12 +1,16 @@
 # kdump-helper
-Prepare any Linux box (RHEL/Ubuntu/Debian/SLES) as a kdump analysis machine.
+Prepare a Linux box (RHEL/Ubuntu/Debian/SLES) as a kdump analysis machine.
+The bootstrap also works on Azure Linux 4.
 
 ### Quick start (single-line bootstrap)
 ```bash
-curl -fsSL https://raw.githubusercontent.com/samatild/kdump-helper/main/bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/samatild/kdump-helper/main/bootstrap.sh | sudo bash
 ```
 
 This ensures a modern Python via pyenv (without relying on distro repos), creates an isolated Python env under `/opt/kdump-helper/.venv`, installs `kdump-helper`, and exposes `kdump-helper` on your PATH.
+The installer requires root; omit `sudo` if already running as root. Its build
+prerequisites include `patch`, which pyenv uses when building Python on newer
+toolchains such as Azure Linux 4.
 
 ### Manual install (no bootstrap)
 If you prefer to install manually or run from a local checkout, use the steps below.
@@ -14,19 +18,19 @@ If you prefer to install manually or run from a local checkout, use the steps be
 1) Install minimal prerequisites (choose your distro):
 ```bash
 # Ubuntu/Debian (for pyenv build toolchain)
-sudo apt-get update && sudo apt-get install -y git curl ca-certificates build-essential \
+sudo apt-get update && sudo apt-get install -y git curl ca-certificates patch build-essential \
   libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev libffi-dev \
   liblzma-dev tk-dev uuid-dev libgdbm-dev libgdbm-compat-dev
 
 # RHEL/Rocky/Alma/Fedora (for pyenv build toolchain)
-sudo dnf install -y git curl ca-certificates gcc make openssl-devel bzip2 bzip2-devel \
+sudo dnf install -y git curl ca-certificates patch gcc make openssl-devel bzip2 bzip2-devel \
   libffi-devel zlib-devel readline-devel sqlite-devel xz xz-devel tk-devel gdbm-devel libuuid-devel || \
-sudo yum install -y git curl ca-certificates gcc make openssl-devel bzip2 bzip2-devel \
+sudo yum install -y git curl ca-certificates patch gcc make openssl-devel bzip2 bzip2-devel \
   libffi-devel zlib-devel readline-devel sqlite-devel xz xz-devel tk-devel gdbm-devel libuuid-devel
 
 # SLES/openSUSE (for pyenv build toolchain)
 sudo zypper --non-interactive refresh && \
-sudo zypper --non-interactive install git curl ca-certificates gcc make libopenssl-devel \
+sudo zypper --non-interactive install git curl ca-certificates patch gcc make libopenssl-devel \
   zlib-devel libbz2-devel libffi-devel readline-devel sqlite3-devel xz-devel tk-devel \
   gdbm-devel libuuid-devel
 ```

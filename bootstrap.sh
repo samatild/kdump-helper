@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 022
 
 # Cross-distro bootstrap for kdump-helper
 # - Installs minimal prereqs
@@ -35,25 +36,25 @@ install_prereqs() {
   case "$pm" in
     deb)
       apt-get update -y
-      apt-get install -y git curl ca-certificates build-essential \
+      apt-get install -y git curl ca-certificates patch build-essential \
         libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev \
         libffi-dev liblzma-dev tk-dev uuid-dev libgdbm-dev libgdbm-compat-dev
       ;;
     dnf)
-      dnf install -y git curl ca-certificates gcc make \
+      dnf install -y git curl ca-certificates patch gcc make \
         openssl-devel bzip2 bzip2-devel libffi-devel zlib-devel \
         readline-devel sqlite-devel xz xz-devel tk-devel gdbm-devel \
         libuuid-devel
       ;;
     yum)
-      yum install -y git curl ca-certificates gcc make \
+      yum install -y git curl ca-certificates patch gcc make \
         openssl-devel bzip2 bzip2-devel libffi-devel zlib-devel \
         readline-devel sqlite-devel xz xz-devel tk-devel gdbm-devel \
-        libuuid-devel || true
+        libuuid-devel
       ;;
     zypper)
       zypper --non-interactive refresh
-      zypper --non-interactive install git curl ca-certificates gcc make \
+      zypper --non-interactive install git curl ca-certificates patch gcc make \
         libopenssl-devel zlib-devel libbz2-devel libffi-devel \
         readline-devel sqlite3-devel xz-devel tk-devel gdbm-devel \
         libuuid-devel
@@ -98,6 +99,8 @@ create_venv() {
 
 install_kdump_helper() {
   pip install "git+${REPO_URL}"
+  # Also repair existing installs created with a restrictive root umask.
+  chmod -R a+rX "$INSTALL_ROOT"
   ln -sf "$VENV_DIR/bin/kdump-helper" /usr/local/bin/kdump-helper
 }
 
@@ -111,5 +114,3 @@ main() {
 }
 
 main "$@"
-
-
