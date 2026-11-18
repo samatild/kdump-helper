@@ -5,6 +5,7 @@ import re
 import platform
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Optional
 from rich.console import Console
@@ -32,33 +33,19 @@ def _run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
 
 
 def extract_release_from_vmcore(vmcore_path: Path) -> Optional[str]:
-    """Attempt to extract OSRELEASE from a vmcore using makedumpfile.
+    """Read OSRELEASE from a dump header, including compressed kdump files.
 
     Returns kernel release like '5.14.0-362.24.1.el9_3.x86_64' or None.
     """
-    if not shutil.which("makedumpfile"):
+    crash_bin = shutil.which("crash")
+    if not crash_bin:
         return None
-    vmcoreinfo = vmcore_path.with_suffix(".vmcoreinfo")
-    # makedumpfile -i <out> <vmcore>
-    result = _run([
-        "makedumpfile",
-        "-i",
-        str(vmcoreinfo),
-        str(vmcore_path),
-    ])
+    result = _run([crash_bin, "--osrelease", str(vmcore_path)])
     if result.returncode != 0:
         return None
-    try:
-        content = vmcoreinfo.read_text(errors="ignore")
-    except OSError:
-        return None
-    match = re.search(
-        r"^OSRELEASE\s*[:=]\s*(\S+)$",
-        content,
-        flags=re.MULTILINE,
-    )
-    if match:
-        return match.group(1)
+    release = result.stdout.strip()
+    if re.fullmatch(r"[0-9][A-Za-z0-9_.+-]*", release):
+        return release
     return None
 
 
@@ -132,11 +119,7 @@ def _run_with_progress(
             text=True,
         )
         
-        # Keep the spinner going until the process completes
-        while process.poll() is None:
-            import time
-            time.sleep(0.1)
-        # Wait for process to complete and get output
+        # Drain output while running so verbose commands cannot fill the pipe.
         stdout, _ = process.communicate()
         return subprocess.CompletedProcess(
             args=cmd,
@@ -381,6 +364,81 @@ def _is_el8_kernel(kernel_release: str) -> bool:
 
 def _is_el9_kernel(kernel_release: str) -> bool:
     return ".el9" in kernel_release
+
+
+def _is_azurelinux_kernel(kernel_release: str) -> bool:
+    return re.fullmatch(
+        r"[0-9][A-Za-z0-9_.+-]*\.azl4\.(x86_64|aarch64)", kernel_release
+    ) is not None
+
+
+def download_azurelinux_debuginfo(
+    kernel_release: str,
+    target_dir: Path,
+    console: Console,
+) -> list[Path]:
+    """Extract only the matching vmlinux from Microsoft's Azure Linux 4 RPM."""
+    from .net_utils import download_with_progress
+
+    if not _is_azurelinux_kernel(kernel_release):
+        raise PackageManagerError(f"Unsupported Azure Linux kernel: {kernel_release}")
+    existing = find_vmlinux_in_target(target_dir, kernel_release)
+    if existing:
+        return existing
+    for binary in ("rpm", "rpm2cpio", "cpio"):
+        if not shutil.which(binary):
+            raise PackageManagerError(f"{binary} is required; run kdump-helper prepare")
+
+    arch = kernel_release.rsplit(".", 1)[-1]
+    rpm_name = f"kernel-debuginfo-{kernel_release}.rpm"
+    url = (
+        f"https://packages.microsoft.com/azurelinux/4/prod/base/debuginfo/"
+        f"{arch}/Packages/k/{rpm_name}"
+    )
+    member = f"/usr/lib/debug/lib/modules/{kernel_release}/vmlinux"
+    destination = target_dir / member.lstrip("/")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    # Stage the RPM in the temporary directory and remove it after extraction.
+    with tempfile.TemporaryDirectory(prefix="kdump-helper-azurelinux-") as download_dir:
+        rpm_path = Path(download_dir) / rpm_name
+        download_with_progress(url, rpm_path, console)
+        metadata = _run([
+            "rpm", "-qp", "--queryformat",
+            "[%{FILENAMES}\t%{FILESIZES}\n]", str(rpm_path),
+        ])
+        if metadata.returncode != 0:
+            raise PackageManagerError(f"Cannot read {rpm_name}:\n{metadata.stdout}")
+        sizes = [
+            line.split("\t", 1)[1]
+            for line in metadata.stdout.splitlines()
+            if line.startswith(member + "\t")
+        ]
+        if len(sizes) != 1 or not sizes[0].isdigit() or int(sizes[0]) == 0:
+            raise PackageManagerError(f"{rpm_name} does not contain a valid {member}")
+        required = int(sizes[0])
+        available = shutil.disk_usage(destination.parent).free
+        if required > available:
+            raise PackageManagerError(
+                f"Not enough space in {target_dir}: vmlinux needs {required} bytes, "
+                f"but only {available} bytes are free. Use --target on a larger filesystem."
+            )
+
+        with tempfile.TemporaryDirectory(
+            prefix=".vmlinux-", dir=destination.parent
+        ) as extract_dir:
+            staged = Path(extract_dir) / "vmlinux"
+            result = _run_with_progress([
+                "bash", "-o", "pipefail", "-c",
+                'rpm2cpio "$1" | cpio -i --quiet --to-stdout "$2" > "$3"',
+                "extract-vmlinux", str(rpm_path), "." + member, str(staged),
+            ], "Extracting Azure Linux vmlinux (without module debuginfo)...", console)
+            if result.returncode != 0:
+                raise PackageManagerError(f"Cannot extract {rpm_name}:\n{result.stdout}")
+            if not staged.is_file() or staged.stat().st_size != required:
+                raise PackageManagerError(f"Incomplete vmlinux extracted from {rpm_name}")
+            staged.replace(destination)
+    return [destination]
 
 
 def _is_ubuntu_kernel(kernel_release: str) -> bool:
@@ -761,7 +819,9 @@ def launch_crash(vmlinux_path: Path, vmcore_path: Path, console: Console) -> Non
 
     cmd = [crash_bin, str(vmlinux_path), str(vmcore_path)]
     console.print(f"[green]Launching crash: {' '.join(cmd)}[/]")
-    subprocess.run(cmd, check=False)
+    result = subprocess.run(cmd, check=False)
+    if result.returncode != 0:
+        raise PackageManagerError(f"crash exited with status {result.returncode}")
 
 
 def _download_with_progress(
@@ -846,4 +906,3 @@ def _sles_enable_debuginfo_repos(console: Console) -> None:
             f"Enabling debuginfo repo {rid}...",
             console,
         )
-

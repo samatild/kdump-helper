@@ -79,6 +79,20 @@ installs the baseline dump and RPM extraction tools. This avoids a large source
 build and does not change kdump capture services or boot settings. Other
 distributions retain their existing installation behavior.
 
+For Azure Linux 4 dumps, `analyze` reads the dump's kernel release with
+`crash --osrelease` and fetches the exact matching debuginfo RPM from Microsoft's
+public repository. It extracts only `vmlinux` into `--target`, rather than
+installing several gigabytes of module symbols. The RPM is downloaded into the
+system temporary directory and removed afterward. Ensure that filesystem has
+space for the download (or set `TMPDIR`), and that `--target` has space for the
+uncompressed `vmlinux`; insufficient target space is reported before extraction.
+Cached symbols are reused on subsequent runs.
+
+Run as root when the dump is root-readable only. Add `--launch` to open the
+dump in crash after fetching symbols; without it, `analyze` prepares the symbols
+and prints the command to run. Failed symbol resolution or a failed crash
+session exits nonzero.
+
 Update to latest:
 ```bash
 # If installed from GitHub

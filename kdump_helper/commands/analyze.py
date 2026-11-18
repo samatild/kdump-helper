@@ -1,4 +1,5 @@
 from pathlib import Path
+import shlex
 from typing import Optional
 from rich.console import Console
 from rich.panel import Panel
@@ -12,6 +13,7 @@ from ..debug_symbols import (
     find_vmlinux_paths,
     download_centos_debuginfo,
     download_ubuntu_debuginfo,
+    download_azurelinux_debuginfo,
     check_existing_debug_symbols,
     launch_crash,
 )
@@ -67,13 +69,13 @@ def analyze(
         rel = extract_release_from_vmcore(vmcore)
     if rel is None and vmcore is not None:
         console.print(
-            "makedumpfile did not provide OSRELEASE, trying strings fallback..."
+            "Could not read vmcore metadata, trying strings fallback..."
         )
         rel = extract_release_from_vmcore_via_strings(vmcore)
     if rel is None:
         raise typer.BadParameter(
             "Could not determine kernel release. Provide --release explicitly, "
-            "or ensure makedumpfile/strings are available."
+            "or ensure crash/strings are available and the dump is readable."
         )
 
     # Manual overrides first
@@ -102,11 +104,18 @@ def analyze(
             console.print("[yellow]✗ RPM extraction did not yield vmlinux; continuing...[/]")
 
     # Decide kernel family to drive strategy
-    from ..debug_symbols import _is_el7_kernel, _is_el8_kernel, _is_el9_kernel, _is_ubuntu_kernel
+    from ..debug_symbols import (
+        _is_el7_kernel,
+        _is_el8_kernel,
+        _is_el9_kernel,
+        _is_ubuntu_kernel,
+        _is_azurelinux_kernel,
+    )
     is_el7 = _is_el7_kernel(rel)
     is_el8 = _is_el8_kernel(rel)
     is_el9 = _is_el9_kernel(rel)
     is_ubuntu = _is_ubuntu_kernel(rel)
+    is_azurelinux = _is_azurelinux_kernel(rel)
 
     # FIRST: Check if debug symbols already exist before any downloads
     console.print(f"[blue]Checking for existing debug symbols for {rel}...[/]")
@@ -131,7 +140,14 @@ def analyze(
             
             # Strategy selection: avoid useless steps
             attempted_pkg_install = False
-            if is_ubuntu and info.id not in {"ubuntu", "debian"}:
+            if is_azurelinux:
+                console.print(
+                    Panel.fit(
+                        "Azure Linux kernel detected; downloading only matching "
+                        "vmlinux from Microsoft's debuginfo repository"
+                    )
+                )
+            elif is_ubuntu and info.id not in {"ubuntu", "debian"}:
                 # Ubuntu guest kernel on non-Ubuntu host: skip system package manager
                 console.print(
                     Panel.fit(
@@ -169,7 +185,17 @@ def analyze(
                     console.print("[yellow]✗ Package install did not yield vmlinux[/]")
 
                 # Kernel-family driven fallbacks
-                if is_el7:
+                if is_azurelinux:
+                    try:
+                        extracted = download_azurelinux_debuginfo(rel, target, console)
+                    except (PackageManagerError, OSError) as e:
+                        console.print(f"[red]Azure Linux symbol download failed: {e}[/]")
+                        raise typer.Exit(code=1) from e
+                    if not extracted:
+                        console.print("[red]Azure Linux download did not yield vmlinux[/]")
+                        raise typer.Exit(code=1)
+                    vmlinux_path = extracted[0]
+                elif is_el7:
                     console.print(
                         Panel.fit("Attempting CentOS debuginfo fallback download...")
                     )
@@ -182,10 +208,10 @@ def analyze(
                             vmlinux_path = extracted[0]
                         else:
                             console.print("[red]✗ CentOS fallback did not yield vmlinux[/]")
-                            return
+                            raise typer.Exit(code=1)
                     except PackageManagerError as e:
                         console.print(f"[yellow]✗ CentOS fallback failed: {e}[/]")
-                        return
+                        raise typer.Exit(code=1) from e
                 elif is_el8:
                     console.print(
                         Panel.fit("Attempting EL8 debuginfo fallback download from mirrors...")
@@ -200,10 +226,10 @@ def analyze(
                             vmlinux_path = extracted[0]
                         else:
                             console.print("[red]✗ EL8 fallback did not yield vmlinux[/]")
-                            return
+                            raise typer.Exit(code=1)
                     except PackageManagerError as e:
                         console.print(f"[yellow]✗ EL8 fallback failed: {e}[/]")
-                        return
+                        raise typer.Exit(code=1) from e
                 elif is_el9:
                     console.print(
                         Panel.fit("Attempting EL9 debuginfo fallback download from mirrors...")
@@ -218,10 +244,10 @@ def analyze(
                             vmlinux_path = extracted[0]
                         else:
                             console.print("[red]✗ EL9 fallback did not yield vmlinux[/]")
-                            return
+                            raise typer.Exit(code=1)
                     except PackageManagerError as e:
                         console.print(f"[yellow]✗ EL9 fallback failed: {e}[/]")
-                        return
+                        raise typer.Exit(code=1) from e
                 elif is_ubuntu:
                     console.print(
                         Panel.fit("Attempting Ubuntu debuginfo fallback download...")
@@ -244,7 +270,7 @@ def analyze(
                             f"  2. Install manually: sudo apt-get install linux-image-{rel}-dbgsym"
                         )
                         console.print("  3. Or provide vmlinux manually")
-                        return
+                        raise typer.Exit(code=1)
                 else:
                     console.print(
                         f"[yellow]✗ No known fallback for kernel family of {rel}."
@@ -252,10 +278,20 @@ def analyze(
                     console.print(
                         "[red]✗ All methods failed. Try manual installation or provide vmlinux manually.[/]"
                     )
-                    return
+                    raise typer.Exit(code=1)
 
+    console.print(f"[green]Symbols ready: {vmlinux_path}[/]")
     # Launch crash if requested and vmcore provided
     if launch and vmcore is not None:
-        launch_crash(vmlinux_path, vmcore, console)
-
-
+        try:
+            launch_crash(vmlinux_path, vmcore, console)
+        except PackageManagerError as e:
+            console.print(f"[red]{e}[/]")
+            raise typer.Exit(code=1) from e
+    elif vmcore is not None:
+        console.print(
+            "Open the dump with:\n  "
+            + shlex.join(["crash", str(vmlinux_path), str(vmcore)]),
+            markup=False,
+            soft_wrap=True,
+        )
