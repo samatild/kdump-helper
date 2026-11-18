@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kdump-helper"
-version = "0.1.0"
+version = "0.1.1"
 description = "Prepare a Linux system (RHEL/Ubuntu/Debian/SLES) for kdump analysis with automatic debug symbol fetching"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -55,4 +55,3 @@ Documentation = "https://github.com/samatild/kdump-helper#readme"
 
 [project.scripts]
 kdump-helper = "kdump_helper.cli:app"
-
